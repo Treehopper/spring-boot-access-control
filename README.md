@@ -45,23 +45,24 @@ persona.
 
 ## How it works
 
-**Policy.** All rules are in one place,
-[`HomeownersPolicy`](src/main/java/eu/hohenegger/accesscontrol/permission/HomeownersPolicy.java):
+**Policy.** Who may do what is defined per feature, in plain role-first rules, for example
+[`AssociationRules`](src/main/java/eu/hohenegger/accesscontrol/permission/rules/AssociationRules.java):
 
 ```java
-Policy.define()
-        .allow(VIEW_ASSOCIATION).to(residents(), districtManagers())
-        .allow(VIEW_MEMBERS).to(owners(), districtManagers())
-        .allow(VIEW_TENANT).to(landlords(), districtManagers().of(Membership::association))
-        .allow(VOTE).to(owners().of(Poll::association))
-        .allow(READ_MESSAGE).to(theSender(), addressees(), districtManagers().of(Message::association))
-        .allow(VIEW_DUES).to(theAccountHolder(), delegates(), managersOfTheHolder())
-        // ...
-        .build();
+@Bean
+PolicyCustomizer associationPermissions() {
+    return policy -> policy
+            .allow(OWNERS).to(VIEW_ASSOCIATION, VIEW_OWNERS, COUNT_TENANTS)
+            .allow(TENANTS).to(VIEW_ASSOCIATION)
+            .allow(LANDLORDS).to(VIEW_TENANT)
+            .allow(DISTRICT_MANAGERS).to(VIEW_ASSOCIATION, VIEW_OWNERS, COUNT_TENANTS, VIEW_TENANT, VIEW_VACANCIES,
+                    MANAGE_RESIDENTS);
+}
 ```
 
-Anything not allowed is denied. Every condition only counts relationships that are active right now, so an
-ended membership or delegation takes effect immediately.
+Anything not allowed is denied. A relationship only counts while it is active, so an ended lease, sale or
+delegation takes effect immediately. The section [The permission policy](#the-permission-policy) below explains
+how to review and extend it.
 
 **Controllers** use a meta-annotation with placeholders (Spring Security's `AnnotationTemplateExpressionDefaults`):
 
@@ -94,14 +95,14 @@ single policy decision.
 
 ```
 SESSION visitor now acts as bob (Tenant · Maple Court, Apt 1)
-DENIED  bob VIEW_MEMBERS on Maple Court (is not owner or district manager)
-GRANTED dave VIEW_DUES on alice (Accountant for Alice Andersen)
+DENIED  bob VIEW_OWNERS on Maple Court (not among owners or district managers)
+GRANTED dave VIEW_DUES on dues account of alice (Accountant for Alice Andersen)
 FILTERED bob READ_MESSAGE: 4 of 7 granted
 ADMIN   carol ended bob's access to Maple Court
 ```
 
 **Tests.** The `@WebMvcTest` tests state, for each endpoint, exactly who may use it. Every other persona is
-expected to get `403`, so each line generates one positive or negative test per persona (677 tests in total):
+expected to get `403`, so each line generates one positive or negative test per persona (686 tests in total):
 
 ```java
 access("read a message to the owners of Maple Court", () -> get("/api/messages/{id}", messageId(ASSEMBLY)))
@@ -109,6 +110,169 @@ access("read a message to the owners of Maple Court", () -> get("/api/messages/{
 ```
 
 Requests for ids that don't exist are also answered with `403`, not `404`, so the API doesn't reveal what exists.
+
+## The permission policy
+
+The policy is written so that developers can add permissions together with a feature, and domain experts
+without programming knowledge can review the result.
+
+### Reading it: `PERMISSIONS.md`
+
+Domain experts don't read Java. They read [`PERMISSIONS.md`](PERMISSIONS.md), which is generated from the
+policy. It contains a "who may do what" table and one section per relationship, written only with the
+plain-language descriptions of relationships and actions:
+
+```markdown
+### Landlords
+
+The owner of the unit a tenant rents. This only relates an owner to their own tenants.
+
+They may:
+
+- see who a tenant is (name and unit)
+```
+
+`PermissionsDocumentTest` compares the file with the current policy and fails when they differ. A change to the
+rules therefore can't be merged without updating `PERMISSIONS.md`, and every pull request that changes a
+permission shows it as a readable diff for the domain expert to approve. Regenerate the file with:
+
+```bash
+./mvnw test -Dtest=PermissionsDocumentTest -Dpermissions.update
+```
+
+### Writing it: the vocabulary
+
+Rules have the form `allow(RELATIONSHIP).to(ACTION, ...)`.
+
+- **Actions** ([`Action`](src/main/java/eu/hohenegger/accesscontrol/permission/Action.java)) are things someone
+  wants to do, typed by what they are done to: `VOTE` is an `Action<Poll>`, `VIEW_TENANT` an `Action<Membership>`.
+- **Relationships** ([`Relationships`](src/main/java/eu/hohenegger/accesscontrol/permission/Relationships.java))
+  say how someone relates to that thing: `OWNERS`, `TENANTS`, `LANDLORDS`, `DISTRICT_MANAGERS`, `SENDERS`,
+  `ADDRESSEES`, `ACCOUNT_HOLDERS`, `DELEGATES`. Each one explains itself, which becomes the reason in the audit log.
+- **Every piece of information gets its own action.** Who owns which unit (`VIEW_OWNERS`), how many tenants there
+  are (`COUNT_TENANTS`), who a tenant is (`VIEW_TENANT`) and which units are empty (`VIEW_VACANCIES`) are separate
+  actions, even though they appear on the same screen. That way the rules say exactly what each relationship gets
+  to see, and the controllers return a field only when its action is granted (`null` otherwise). Don't hide extra
+  data behind a broad action such as "view members": a reviewer can't see it in the rules or in `PERMISSIONS.md`.
+- Relationships to an association, such as `OWNERS` or `DISTRICT_MANAGERS`, work for everything that belongs to an
+  association (anything implementing `AssociationScoped`): the association itself, its polls, messages, tenancies
+  and the dues accounts of its owners. Other relationships only fit one kind of target, and the compiler enforces
+  it: `allow(SENDERS).to(VIEW_DUES)` doesn't compile, because senders relate to messages, not dues accounts.
+
+### Extending it: `PolicyCustomizer` beans
+
+Like Spring Boot's `Jackson2ObjectMapperBuilderCustomizer`, every `PolicyCustomizer` bean contributes to one shared
+policy, which [`PolicyConfiguration`](src/main/java/eu/hohenegger/accesscontrol/permission/PolicyConfiguration.java)
+builds at startup. Permissions only add up, so the order of the customizers doesn't matter. Each feature has its
+own rule class in [`permission/rules`](src/main/java/eu/hohenegger/accesscontrol/permission/rules):
+`AssociationRules`, `PollRules`, `MessageRules` and `DuesRules`.
+
+For example, a new feature that lets residents report repairs to a caretaker would add three things.
+
+1. Its actions, each with a description for `PERMISSIONS.md`:
+
+   ```java
+   public final class RepairActions {
+       public static final Action<Association> REPORT_REPAIR =
+               Action.define("REPORT_REPAIR", Association.class, "report something that needs repair");
+       public static final Action<Association> VIEW_REPAIRS =
+               Action.define("VIEW_REPAIRS", Association.class, "see reported repairs");
+   }
+   ```
+
+2. A new relationship, if the existing ones don't fit:
+
+   ```java
+   public static final Relationship<AssociationScoped> CARETAKERS = Relationship.define("caretakers",
+           "Caretakers currently looking after the association's buildings.",
+           (context, target) -> target.associationsAt(context.now())
+                   .flatMap(association -> association.caretakerAssignmentOf(context.actor(), context.now()).stream())
+                   .findFirst().map(Object::toString));
+   ```
+
+3. A customizer bean with its rules:
+
+   ```java
+   @Configuration
+   public class RepairRules {
+
+       @Bean
+       PolicyCustomizer repairPermissions() {
+           return policy -> policy
+                   .allow(OWNERS).to(REPORT_REPAIR, VIEW_REPAIRS)
+                   .allow(TENANTS).to(REPORT_REPAIR)
+                   .allow(CARETAKERS).to(VIEW_REPAIRS)
+                   .allow(DISTRICT_MANAGERS).to(VIEW_REPAIRS);
+       }
+   }
+   ```
+
+The controller then uses the new action like any other:
+
+```java
+@PostMapping("/api/associations/{id}/repairs")
+@RequirePermission(action = "REPORT_REPAIR", on = "id")
+RepairView report(@PathVariable String id, @RequestBody NewRepair repair, User me) { ... }
+```
+
+Then run the tests. `PermissionsDocumentTest` fails until `PERMISSIONS.md` is regenerated, and the regenerated file
+shows the new rows and the new "Caretakers" section for review. The new endpoint also gets an access-matrix test
+line, such as `access("report a repair in Maple Court", ...).grantedOnlyTo(...)`. `PolicyCustomizerTest` shows a
+customizer bean extending the policy in isolation.
+
+`caretakerAssignmentOf` doesn't exist in the demo; the repair feature would add it to the domain together with
+its data.
+
+### Example: owners see their own tenant, but not the others
+
+alice rents Apt 1 out to bob, and frank rents Apt 2 out to kim. In the member list, alice should see bob's
+name but only a count for kim. The rules in `AssociationRules` say exactly that:
+
+```java
+.allow(OWNERS).to(VIEW_ASSOCIATION, VIEW_OWNERS, COUNT_TENANTS)
+.allow(LANDLORDS).to(VIEW_TENANT)
+```
+
+Read as: owners see who owns which unit and *how many* tenants there are; landlords see *who* a tenant is.
+
+1. **`COUNT_TENANTS`** is checked on the association. All owners have it, so alice gets the number of tenants.
+2. **`VIEW_TENANT`** is checked once per tenancy, with that tenancy (bob in Apt 1, kim in Apt 2) as the target,
+   not the association. That's why it can be granted for one tenant and denied for another. Only `LANDLORDS`
+   and `DISTRICT_MANAGERS` have it, and `LANDLORDS` holds only if the viewer currently owns *the unit that
+   tenancy is for*:
+
+   ```java
+   tenancy.unit().residents().activeAt(context.now()).owners().of(context.actor())
+   ```
+
+[`AssociationController`](src/main/java/eu/hohenegger/accesscontrol/web/AssociationController.java) applies both
+checks to the member list (which itself requires `VIEW_OWNERS`):
+
+```java
+List<Membership> tenancies = residents.tenants().list();
+List<Member> visibleTenants = permissions.check(me).may(VIEW_TENANT).filter(tenancies)...;
+return new MemberList(owners, visibleTenants, may(me, COUNT_TENANTS, association) ? tenancies.size() : null);
+```
+
+| Viewer | bob (Apt 1) | kim (Apt 2) | Response |
+|---|---|---|---|
+| alice, owner of Apt 1 | ✔ landlord of Apt 1 | ✘ not her unit | `tenants: [bob], tenantCount: 2` |
+| frank, owner of Apt 2 and 3 | ✘ not his unit | ✔ landlord of Apt 2 | `tenants: [kim], tenantCount: 2` |
+| mia, lives in Apt 4 | ✘ | ✘ | `tenants: [], tenantCount: 2` |
+| carol, property manager | ✔ district manager | ✔ district manager | `tenants: [bob, kim], tenantCount: 2` |
+| bob, tenant | — | — | `403`: no `VIEW_OWNERS` |
+
+The audit log shows each decision with its reason (the individual decisions at `DEBUG`):
+
+```
+GRANTED alice VIEW_OWNERS on Maple Court (owner in Maple Court, Apt 1)
+GRANTED alice VIEW_TENANT on tenant in Maple Court, Apt 1 (landlord of Apt 1 in Maple Court)
+DENIED  alice VIEW_TENANT on tenant in Maple Court, Apt 2 (not among landlords or district managers)
+FILTERED alice VIEW_TENANT: 1 of 2 granted
+```
+
+Because the relationship is checked at the moment of the request, the name disappears as soon as bob's lease ends
+or alice sells Apt 1. `ownersSeeTheTenantsOfTheirOwnFlatsByName` in `AssociationAccessTest` tests the table above.
 
 ## Design notes
 

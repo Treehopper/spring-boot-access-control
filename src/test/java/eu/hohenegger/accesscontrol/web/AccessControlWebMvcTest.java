@@ -3,7 +3,6 @@ package eu.hohenegger.accesscontrol.web;
 import eu.hohenegger.accesscontrol.config.CommunityConfig;
 import eu.hohenegger.accesscontrol.config.SecurityConfig;
 import eu.hohenegger.accesscontrol.permission.AccessRules;
-import eu.hohenegger.accesscontrol.permission.HomeownersPolicy;
 import eu.hohenegger.accesscontrol.permission.Permissions;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
@@ -17,6 +16,6 @@ import java.lang.annotation.Target;
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)
 @WebMvcTest
-@Import({CommunityConfig.class, SecurityConfig.class, HomeownersPolicy.class, Permissions.class, AccessRules.class})
+@Import({CommunityConfig.class, SecurityConfig.class, PolicyRules.class, Permissions.class, AccessRules.class})
 @interface AccessControlWebMvcTest {
 }

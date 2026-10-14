@@ -18,7 +18,7 @@ import static eu.hohenegger.accesscontrol.permission.Action.MANAGE_RESIDENTS;
 import static eu.hohenegger.accesscontrol.permission.Action.SEND_MESSAGE;
 import static eu.hohenegger.accesscontrol.permission.Action.VIEW_ASSOCIATION;
 import static eu.hohenegger.accesscontrol.permission.Action.VIEW_DUES;
-import static eu.hohenegger.accesscontrol.permission.Action.VIEW_MEMBERS;
+import static eu.hohenegger.accesscontrol.permission.Action.VIEW_OWNERS;
 import static eu.hohenegger.accesscontrol.permission.Action.VIEW_POLLS;
 
 /**
@@ -28,7 +28,7 @@ import static eu.hohenegger.accesscontrol.permission.Action.VIEW_POLLS;
 @RestController
 class MeController {
 
-    record Capabilities(boolean viewMembers, boolean viewPolls, boolean createPoll,
+    record Capabilities(boolean viewOwners, boolean viewPolls, boolean createPoll,
                         boolean sendMessage, boolean manageResidents) {
     }
 
@@ -55,14 +55,14 @@ class MeController {
                         relation(me, association), capabilities(me, association)))
                 .toList();
         List<PersonRef> duesAccounts = permissions.check(me).may(VIEW_DUES)
-                .filter(community.duesAccounts().stream().map(DuesAccount::holder).toList())
-                .stream().map(PersonRef::of).toList();
+                .filter(community.duesAccounts())
+                .stream().map(DuesAccount::holder).map(PersonRef::of).toList();
         return new Me(me.username(), me.displayName(), Personas.describe(community, me), associations, duesAccounts);
     }
 
     private Capabilities capabilities(User me, Association association) {
         return new Capabilities(
-                may(me, VIEW_MEMBERS, association),
+                may(me, VIEW_OWNERS, association),
                 may(me, VIEW_POLLS, association),
                 may(me, CREATE_POLL, association),
                 may(me, SEND_MESSAGE, association),

@@ -5,8 +5,9 @@ import java.util.EnumMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Stream;
 
-public final class Poll {
+public final class Poll implements AssociationScoped {
 
     private final String id;
     private final Association association;
@@ -47,6 +48,11 @@ public final class Poll {
 
     public Association association() {
         return association;
+    }
+
+    @Override
+    public Stream<Association> associationsAt(Instant instant) {
+        return Stream.of(association);
     }
 
     public User askedBy() {

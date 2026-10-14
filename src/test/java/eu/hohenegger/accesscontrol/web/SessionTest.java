@@ -79,12 +79,12 @@ class SessionTest extends AccessTestSupport {
                 .andExpect(jsonPath("$.associations[0].can.manageResidents").value(true));
         as("alice", get("/api/me"))
                 .andExpect(jsonPath("$.associations[0].relation").value("Owner"))
-                .andExpect(jsonPath("$.associations[0].can.viewMembers").value(true))
+                .andExpect(jsonPath("$.associations[0].can.viewOwners").value(true))
                 .andExpect(jsonPath("$.associations[0].can.sendMessage").value(false))
                 .andExpect(jsonPath("$.duesAccounts[*].username", contains("alice")));
         as("bob", get("/api/me"))
                 .andExpect(jsonPath("$.associations[0].relation").value("Tenant"))
-                .andExpect(jsonPath("$.associations[0].can.viewMembers").value(false))
+                .andExpect(jsonPath("$.associations[0].can.viewOwners").value(false))
                 .andExpect(jsonPath("$.associations[0].can.viewPolls").value(false));
         as("dave", get("/api/me"))
                 .andExpect(jsonPath("$.associations", empty()))

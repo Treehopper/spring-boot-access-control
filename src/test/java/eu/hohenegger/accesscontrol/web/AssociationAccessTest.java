@@ -73,6 +73,27 @@ class AssociationAccessTest extends AccessTestSupport {
                         .andExpect(jsonPath("$.tenantCount").value(2))));
     }
 
+    /** Each detail of the association summary needs its own permission; tenants get none of them. */
+    @TestFactory
+    Stream<DynamicTest> theAssociationSummaryShowsOnlyGrantedDetails() {
+        Map<String, String> expected = new LinkedHashMap<>();
+        expected.put("alice", "owners, tenant count");
+        expected.put("frank", "owners, tenant count");
+        expected.put("mia", "owners, tenant count");
+        expected.put("bob", "nothing");
+        expected.put("kim", "nothing");
+        expected.put("carol", "owners, tenant count, vacancies");
+        return expected.entrySet().stream().map(entry -> DynamicTest.dynamicTest(entry.getKey() + " sees " + entry.getValue(), () -> {
+            boolean counts = !entry.getValue().equals("nothing");
+            boolean vacancies = entry.getValue().contains("vacancies");
+            as(entry.getKey(), get("/api/associations/maple-court"))
+                    .andExpect(status().isOk())
+                    .andExpect(counts ? jsonPath("$.owners").value(3) : jsonPath("$.owners").doesNotExist())
+                    .andExpect(counts ? jsonPath("$.tenants").value(2) : jsonPath("$.tenants").doesNotExist())
+                    .andExpect(vacancies ? jsonPath("$.vacantUnits", contains("Apt 3")) : jsonPath("$.vacantUnits").doesNotExist());
+        }));
+    }
+
     @Test
     void ownersSeeOtherOwnersButOnlyTheNumberOfOtherTenants() throws Exception {
         as("alice", get("/api/associations/maple-court/members"))

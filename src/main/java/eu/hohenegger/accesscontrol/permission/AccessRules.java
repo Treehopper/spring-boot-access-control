@@ -2,6 +2,7 @@ package eu.hohenegger.accesscontrol.permission;
 
 import eu.hohenegger.accesscontrol.domain.Association;
 import eu.hohenegger.accesscontrol.domain.Community;
+import eu.hohenegger.accesscontrol.domain.DuesAccount;
 import eu.hohenegger.accesscontrol.domain.Message;
 import eu.hohenegger.accesscontrol.domain.Poll;
 import eu.hohenegger.accesscontrol.domain.User;
@@ -65,8 +66,9 @@ public class AccessRules {
         if (type == Message.class) {
             return community.findMessage(id);
         }
-        if (type == User.class) {
-            return community.findUser(id);
+        if (type == DuesAccount.class) {
+            // dues accounts are addressed by their holder's username
+            return community.findUser(id).flatMap(community::findDuesAccountOf);
         }
         throw new IllegalStateException("No resolver for " + type);
     }

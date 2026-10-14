@@ -2,12 +2,13 @@ package eu.hohenegger.accesscontrol.domain;
 
 import java.time.Instant;
 import java.util.Optional;
+import java.util.stream.Stream;
 
 /**
  * A resident's place in an association. Ending a membership sets {@link #until()} instead of deleting it,
  * so former residents stay visible as such.
  */
-public final class Membership implements TimeBound {
+public final class Membership implements TimeBound, AssociationScoped {
 
     private final User resident;
     private final Unit unit;
@@ -52,6 +53,11 @@ public final class Membership implements TimeBound {
 
     public Association association() {
         return unit.association();
+    }
+
+    @Override
+    public Stream<Association> associationsAt(Instant instant) {
+        return Stream.of(unit.association());
     }
 
     public Role role() {

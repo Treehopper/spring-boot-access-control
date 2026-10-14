@@ -2,8 +2,9 @@ package eu.hohenegger.accesscontrol.domain;
 
 import java.time.Instant;
 import java.util.Optional;
+import java.util.stream.Stream;
 
-public final class Message {
+public final class Message implements AssociationScoped {
 
     private final String id;
     private final User sender;
@@ -36,6 +37,11 @@ public final class Message {
 
     public Association association() {
         return association;
+    }
+
+    @Override
+    public Stream<Association> associationsAt(Instant instant) {
+        return Stream.of(association);
     }
 
     public Audience audience() {

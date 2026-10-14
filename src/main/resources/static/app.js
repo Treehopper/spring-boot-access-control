@@ -87,7 +87,7 @@ function tabsFor(me, association) {
     const can = association?.can ?? {};
     return [
         association && {id: 'messages', label: 'Messages'},
-        can.viewMembers && {id: 'members', label: 'Members'},
+        can.viewOwners && {id: 'members', label: 'Members'},
         can.viewPolls && {id: 'polls', label: 'Polls'},
         me.duesAccounts.length > 0 && {id: 'dues', label: me.duesAccounts.length === 1 && me.duesAccounts[0].username === me.username ? 'My dues' : 'Dues accounts'},
         can.sendMessage && {id: 'compose', label: 'Send message'},
@@ -261,7 +261,7 @@ async function members(me, association) {
             h('span', {class: `badge ${kind}`, style: 'margin-left:auto'}, kind === 'owner' ? 'Owner' : 'Tenant'))));
     return [
         h('div', {class: 'card'}, h('h2', {}, `Owners (${new Set(list.owners.map(owner => owner.username)).size})`), people(list.owners, 'owner')),
-        h('div', {class: 'card'}, h('h2', {}, `Tenants (${list.tenantCount})`),
+        list.tenantCount !== null && h('div', {class: 'card'}, h('h2', {}, `Tenants (${list.tenantCount})`),
             list.tenantCount === 0 && h('p', {class: 'muted'}, 'No tenants.'),
             list.tenants.length > 0 && people(list.tenants, 'tenant'),
             list.tenantCount > list.tenants.length && h('div', {class: 'notice', style: list.tenants.length ? 'margin-top:8px' : ''},
@@ -426,7 +426,7 @@ async function residents(me, association) {
     return h('div', {class: 'card'},
         h('h2', {}, 'Residents'),
         h('p', {class: 'muted'}, 'Changes take effect immediately. Switch persona to see the result through their eyes.'),
-        summary.vacantUnits.length > 0 && h('div', {class: 'notice', style: 'margin-bottom:12px'},
+        summary.vacantUnits?.length > 0 && h('div', {class: 'notice', style: 'margin-bottom:12px'},
             `Nobody lives in: ${summary.vacantUnits.join(', ')}`),
         h('div', {class: 'table-wrap'}, h('table', {},
             h('thead', {}, h('tr', {}, h('th', {}, 'Unit'), h('th', {}, 'Name'), h('th', {}, 'Role'), h('th', {}, 'Status'), h('th', {}, ''))),

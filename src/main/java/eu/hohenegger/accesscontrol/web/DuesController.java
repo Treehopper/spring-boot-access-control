@@ -38,9 +38,11 @@ class DuesController {
     @GetMapping("/api/residents/{username}/dues")
     @RequirePermission(action = "VIEW_DUES", on = "username")
     DuesView dues(@PathVariable String username, User me) {
-        User holder = community.findUser(username).orElseThrow(() -> new ResponseStatusException(NOT_FOUND));
-        List<DuesEntry> entries = community.findDuesAccountOf(holder).map(DuesAccount::entries).orElse(List.of());
-        List<Delegate> sharedWith = permissions.check(me).may(MANAGE_DELEGATES).on(holder).granted()
+        DuesAccount account = community.findUser(username).flatMap(community::findDuesAccountOf)
+                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND));
+        User holder = account.holder();
+        List<DuesEntry> entries = account.entries();
+        List<Delegate> sharedWith = permissions.check(me).may(MANAGE_DELEGATES).on(account).granted()
                 ? community.delegations().from(holder).activeAt(community.now()).stream()
                         .map(delegation -> new Delegate(PersonRef.of(delegation.delegate()), delegation.purpose(), delegation.since()))
                         .toList()

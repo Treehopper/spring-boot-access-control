@@ -56,7 +56,7 @@ public final class Community {
 
     public synchronized DuesAccount duesOf(User holder) {
         return findDuesAccountOf(holder).orElseGet(() -> {
-            DuesAccount account = new DuesAccount(holder);
+            DuesAccount account = new DuesAccount(holder, this);
             duesAccounts.add(account);
             return account;
         });

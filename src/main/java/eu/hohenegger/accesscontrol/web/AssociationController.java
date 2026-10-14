@@ -6,6 +6,7 @@ import eu.hohenegger.accesscontrol.domain.Membership;
 import eu.hohenegger.accesscontrol.domain.Residents;
 import eu.hohenegger.accesscontrol.domain.Unit;
 import eu.hohenegger.accesscontrol.domain.User;
+import eu.hohenegger.accesscontrol.permission.Action;
 import eu.hohenegger.accesscontrol.permission.Permissions;
 import eu.hohenegger.accesscontrol.permission.RequirePermission;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -16,23 +17,33 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
 
+import static eu.hohenegger.accesscontrol.permission.Action.COUNT_TENANTS;
 import static eu.hohenegger.accesscontrol.permission.Action.VIEW_ASSOCIATION;
+import static eu.hohenegger.accesscontrol.permission.Action.VIEW_OWNERS;
 import static eu.hohenegger.accesscontrol.permission.Action.VIEW_TENANT;
+import static eu.hohenegger.accesscontrol.permission.Action.VIEW_VACANCIES;
 import static org.springframework.http.HttpStatus.NOT_FOUND;
 
 @RestController
 @RequestMapping("/api/associations")
 class AssociationController {
 
-    /** {@code vacantUnits} are units nobody currently lives in. */
-    record AssociationSummary(String id, String name, String district, int owners, int tenants, List<String> vacantUnits) {
+    /**
+     * Each detail is {@code null} unless the viewer may see it: {@code owners} with VIEW_OWNERS, {@code tenants}
+     * with COUNT_TENANTS and {@code vacantUnits} (units nobody lives in) with VIEW_VACANCIES.
+     */
+    record AssociationSummary(String id, String name, String district, Integer owners, Integer tenants,
+                              List<String> vacantUnits) {
     }
 
     record Member(String username, String displayName, String unit, boolean livesThere) {
     }
 
-    /** {@code tenants} lists only the tenants the viewer may know by name; {@code tenantCount} counts all of them. */
-    record MemberList(List<Member> owners, List<Member> tenants, int tenantCount) {
+    /**
+     * {@code tenants} lists only the tenants the viewer may see (VIEW_TENANT, checked per tenancy);
+     * {@code tenantCount} counts all of them and is {@code null} without COUNT_TENANTS.
+     */
+    record MemberList(List<Member> owners, List<Member> tenants, Integer tenantCount) {
     }
 
     private final Community community;
@@ -46,18 +57,18 @@ class AssociationController {
     @GetMapping
     List<AssociationSummary> list(User me) {
         return permissions.check(me).may(VIEW_ASSOCIATION).filter(community.associations()).stream()
-                .map(this::summary)
+                .map(association -> summary(association, me))
                 .toList();
     }
 
     @GetMapping("/{id}")
     @RequirePermission(action = "VIEW_ASSOCIATION", on = "id")
-    AssociationSummary get(@PathVariable String id) {
-        return summary(association(id));
+    AssociationSummary get(@PathVariable String id, User me) {
+        return summary(association(id), me);
     }
 
     @GetMapping("/{id}/members")
-    @RequirePermission(action = "VIEW_MEMBERS", on = "id")
+    @RequirePermission(action = "VIEW_OWNERS", on = "id")
     MemberList members(@PathVariable String id, User me) {
         Association association = association(id);
         Residents residents = association.residents().activeAt(community.now());
@@ -65,14 +76,22 @@ class AssociationController {
         List<Member> visibleTenants = permissions.check(me).may(VIEW_TENANT).filter(tenancies).stream()
                 .map(AssociationController::member)
                 .toList();
-        return new MemberList(members(residents.owners()), visibleTenants, tenancies.size());
+        return new MemberList(members(residents.owners()), visibleTenants,
+                may(me, COUNT_TENANTS, association) ? tenancies.size() : null);
     }
 
-    private AssociationSummary summary(Association association) {
+    private AssociationSummary summary(Association association, User me) {
         Residents residents = association.residents().activeAt(community.now());
         return new AssociationSummary(association.id(), association.name(), association.district().name(),
-                residents.owners().people().size(), residents.tenants().people().size(),
-                association.units().stream().filter(unit -> unit.isVacantAt(community.now())).map(Unit::name).toList());
+                may(me, VIEW_OWNERS, association) ? residents.owners().people().size() : null,
+                may(me, COUNT_TENANTS, association) ? residents.tenants().people().size() : null,
+                may(me, VIEW_VACANCIES, association)
+                        ? association.units().stream().filter(unit -> unit.isVacantAt(community.now())).map(Unit::name).toList()
+                        : null);
+    }
+
+    private boolean may(User me, Action<Association> action, Association association) {
+        return permissions.check(me).may(action).on(association).granted();
     }
 
     private static List<Member> members(Residents residents) {

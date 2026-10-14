@@ -1,10 +1,12 @@
 package eu.hohenegger.accesscontrol.domain;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.stream.Stream;
 
-public final class Association {
+public final class Association implements AssociationScoped {
 
     private final String id;
     private final String name;
@@ -37,6 +39,11 @@ public final class Association {
 
     public Residents residents() {
         return new Residents(memberships);
+    }
+
+    @Override
+    public Stream<Association> associationsAt(Instant instant) {
+        return Stream.of(this);
     }
 
     public String id() {

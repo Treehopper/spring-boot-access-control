@@ -19,13 +19,13 @@ class AuditLogTest extends AccessTestSupport {
     @Test
     void deniedRequestsAreLoggedWithTheReason(CapturedOutput output) throws Exception {
         as("bob", json(post("/api/polls/{id}/votes", pollIn("maple-court")), "{\"choice\":\"YES\"}")).andExpect(status().isForbidden());
-        assertThat(output).contains("DENIED  bob VOTE on poll #" + pollIn("maple-court") + " in Maple Court (is not owner)");
+        assertThat(output).contains("DENIED  bob VOTE on poll #" + pollIn("maple-court") + " in Maple Court (not among owners)");
     }
 
     @Test
     void grantedRequestsAreLoggedWithTheReason(CapturedOutput output) throws Exception {
         as("dave", get("/api/residents/alice/dues")).andExpect(status().isOk());
-        assertThat(output).contains("GRANTED dave VIEW_DUES on alice (Accountant for Alice Andersen)");
+        assertThat(output).contains("GRANTED dave VIEW_DUES on dues account of alice (Accountant for Alice Andersen)");
     }
 
     @Test
