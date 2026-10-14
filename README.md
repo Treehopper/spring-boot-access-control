@@ -61,7 +61,8 @@ PolicyCustomizer associationPermissions() {
 ```
 
 Anything not allowed is denied. A relationship only counts while it is active, so an ended lease, sale or
-delegation takes effect immediately. The section [The permission policy](#the-permission-policy) below explains
+delegation takes effect immediately. The builder produces a JPA model of the policy, which is stored in the
+database at startup; the application decides with what was stored. The section [The permission policy](#the-permission-policy) below explains
 how to review and extend it.
 
 **Controllers** use a meta-annotation with placeholders (Spring Security's `AnnotationTemplateExpressionDefaults`):
@@ -102,7 +103,7 @@ ADMIN   carol ended bob's access to Maple Court
 ```
 
 **Tests.** The `@WebMvcTest` tests state, for each endpoint, exactly who may use it. Every other persona is
-expected to get `403`, so each line generates one positive or negative test per persona (686 tests in total):
+expected to get `403`, so each line generates one positive or negative test per persona (692 tests in total):
 
 ```java
 access("read a message to the owners of Maple Court", () -> get("/api/messages/{id}", messageId(ASSEMBLY)))
@@ -183,7 +184,7 @@ For example, a new feature that lets residents report repairs to a caretaker wou
 2. A new relationship, if the existing ones don't fit:
 
    ```java
-   public static final Relationship<AssociationScoped> CARETAKERS = Relationship.define("caretakers",
+   public static final Relationship<AssociationScoped> CARETAKERS = Relationship.define("caretakers", AssociationScoped.class,
            "Caretakers currently looking after the association's buildings.",
            (context, target) -> target.associationsAt(context.now())
                    .flatMap(association -> association.caretakerAssignmentOf(context.actor(), context.now()).stream())
@@ -222,6 +223,69 @@ customizer bean extending the policy in isolation.
 
 `caretakerAssignmentOf` doesn't exist in the demo; the repair feature would add it to the domain together with
 its data.
+
+### Storing it: the JPA model
+
+The fluent builder doesn't create the policy directly. It builds a JPA model of it: one `PermissionEntity` per
+`allow(...).to(...)` pair, pointing to a `RelationshipEntity` and an `ActionEntity` that hold the names, target
+types and plain-language descriptions
+([`permission/model`](src/main/java/eu/hohenegger/accesscontrol/permission/model)).
+
+```java
+List<PermissionEntity> model = Policy.define()
+        .allow(OWNERS).to(VIEW_POLLS, VOTE)
+        .allow(DISTRICT_MANAGERS).to(VIEW_POLLS, CREATE_POLL)
+        .build();
+Policy policy = Policy.of(policyStore.replaceWith(model));
+```
+
+At startup [`PolicyConfiguration`](src/main/java/eu/hohenegger/accesscontrol/permission/PolicyConfiguration.java)
+runs all `PolicyCustomizer` beans on one builder, and
+[`PolicyStore`](src/main/java/eu/hohenegger/accesscontrol/permission/model/PolicyStore.java) replaces the stored
+policy with the result and reads it back. The `Policy` bean is created from what was read, so the permissions
+the application enforces are exactly the rows in the database. The audit log reports it:
+
+```
+POLICY  24 permissions stored: {owners=[VIEW_ASSOCIATION, VIEW_OWNERS, COUNT_TENANTS, VIEW_POLLS, VOTE], ...}
+```
+
+```mermaid
+erDiagram
+    policy_relationship ||--o{ policy_permission : "is allowed"
+    policy_action ||--o{ policy_permission : "is allowed by"
+
+    policy_relationship {
+        varchar name PK "e.g. landlords"
+        varchar target_type "what it relates someone to, e.g. Membership"
+        varchar description "plain language, shown in PERMISSIONS.md"
+    }
+    policy_action {
+        varchar name PK "e.g. VIEW_TENANT, used in @RequirePermission"
+        varchar target_type "what it is done to, e.g. Membership"
+        varchar description "plain language, shown in PERMISSIONS.md"
+    }
+    policy_permission {
+        bigint id PK
+        varchar relationship_name FK, UK "allow(relationship)"
+        varchar action_name FK, UK ".to(action)"
+        int ordinal "order in the policy"
+        varchar defined_by "customizer bean, e.g. associationPermissions"
+    }
+```
+
+Each relationship and action is stored once, however many permissions use it, and a pair can't be stored twice
+(unique key on `relationship_name` and `action_name`). `defined_by` records which customizer bean added a
+permission, so a reviewer can trace each row back to its feature.
+
+The tables hold the vocabulary and the rules, but not *how* to tell whether a relationship holds: that is code,
+such as the landlord check below. `Policy.of(...)` therefore looks each name up among the relationships and
+actions defined in code, and refuses to start if a row names an unknown one, or pairs a relationship with an
+action on something it can't judge (for example `landlords` with `VIEW_DUES`: landlords relate to tenancies, not
+dues accounts). In code the compiler prevents that pairing; for the database, `PolicyStoreTest` tests the check.
+
+The code stays the source of truth. The stored policy is replaced as a whole at every start, so a permission
+removed from a customizer also disappears from the database. The demo uses an embedded H2 database; set
+`spring.datasource.url` to keep the policy in another database, for example to query it from a reporting tool.
 
 ### Example: owners see their own tenant, but not the others
 

@@ -1,22 +1,29 @@
 package eu.hohenegger.accesscontrol.permission;
 
+import eu.hohenegger.accesscontrol.permission.model.ActionEntity;
+import eu.hohenegger.accesscontrol.permission.model.PermissionEntity;
+import eu.hohenegger.accesscontrol.permission.model.RelationshipEntity;
+
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
  * Which relationships allow which actions. Anything not explicitly allowed is denied.
+ * <p>
+ * The fluent builder produces the JPA model of the policy, ready to be stored; a {@code Policy} is created from the
+ * stored model:
  *
  * <pre>{@code
- * Policy.define()
+ * List<PermissionEntity> model = Policy.define()
  *     .allow(OWNERS).to(VIEW_POLLS, VOTE)
  *     .allow(DISTRICT_MANAGERS).to(VIEW_POLLS, CREATE_POLL)
  *     .build();
+ * Policy policy = Policy.of(policyStore.replaceWith(model));
  * }</pre>
  *
  * In the application the builder is filled by {@link PolicyCustomizer} beans, see {@link PolicyConfiguration}.
@@ -35,6 +42,32 @@ public final class Policy {
 
     public static Builder define() {
         return new Builder();
+    }
+
+    /**
+     * The policy described by the stored model. Relationships and actions are looked up by name among those defined
+     * in code, because only the code knows how to tell whether a relationship holds.
+     *
+     * @throws IllegalStateException if the model names an unknown relationship or action, or pairs a relationship
+     *                               with an action on a target it cannot judge
+     */
+    public static Policy of(Collection<PermissionEntity> model) {
+        List<Permission> permissions = new ArrayList<>();
+        for (PermissionEntity entity : model) {
+            try {
+                Relationship<?> relationship = Relationship.named(entity.relationship().name());
+                Action<?> action = Action.named(entity.action().name());
+                if (!relationship.fits(action)) {
+                    throw new IllegalStateException("Stored permission " + entity + " is invalid: " + relationship
+                            + " relate to " + relationship.targetType().getSimpleName() + ", but " + action + " is done to "
+                            + action.targetType().getSimpleName());
+                }
+                permissions.add(new Permission(relationship, action));
+            } catch (IllegalArgumentException unknown) {
+                throw new IllegalStateException("Stored permission " + entity + " is invalid: " + unknown.getMessage(), unknown);
+            }
+        }
+        return new Policy(permissions);
     }
 
     public <T> Decision decide(Context context, Action<T> action, T target) {
@@ -73,15 +106,19 @@ public final class Policy {
         return description;
     }
 
-    // Safe: Builder.Allowance.to(...) only accepts actions whose target type the relationship can judge.
+    // Safe: Builder.Allowance.to(...) and of(...) only accept actions whose target type the relationship can judge.
     @SuppressWarnings("unchecked")
     private static Optional<String> reasonFor(Relationship<?> relationship, Context context, Object target) {
         return ((Relationship<Object>) relationship).reasonFor(context, target);
     }
 
+    /** Collects the rules as a JPA model; equal rules from several customizers are stored once. */
     public static final class Builder {
 
-        private final Set<Permission> permissions = new LinkedHashSet<>();
+        private final Map<String, RelationshipEntity> relationships = new LinkedHashMap<>();
+        private final Map<String, ActionEntity> actions = new LinkedHashMap<>();
+        private final Map<List<String>, PermissionEntity> permissions = new LinkedHashMap<>();
+        private String definedBy;
 
         private Builder() {
         }
@@ -91,8 +128,15 @@ public final class Policy {
             return new Allowance<>(relationship);
         }
 
-        public Policy build() {
-            return new Policy(new ArrayList<>(permissions));
+        /** Records which bean contributes the following rules. */
+        Builder definedBy(String source) {
+            this.definedBy = source;
+            return this;
+        }
+
+        /** The policy as unsaved JPA entities, in the order the rules were added. */
+        public List<PermissionEntity> build() {
+            return List.copyOf(permissions.values());
         }
 
         public final class Allowance<T> {
@@ -106,10 +150,19 @@ public final class Policy {
             @SafeVarargs
             public final Builder to(Action<? extends T>... actions) {
                 for (Action<? extends T> action : actions) {
-                    permissions.add(new Permission(relationship, action));
+                    add(relationship, action);
                 }
                 return Builder.this;
             }
+        }
+
+        private void add(Relationship<?> relationship, Action<?> action) {
+            RelationshipEntity relationshipEntity = relationships.computeIfAbsent(relationship.name(), name ->
+                    new RelationshipEntity(name, relationship.targetType().getSimpleName(), relationship.description()));
+            ActionEntity actionEntity = actions.computeIfAbsent(action.name(), name ->
+                    new ActionEntity(name, action.targetType().getSimpleName(), action.description()));
+            permissions.computeIfAbsent(List.of(relationship.name(), action.name()), key ->
+                    new PermissionEntity(relationshipEntity, actionEntity, permissions.size(), definedBy));
         }
     }
 }

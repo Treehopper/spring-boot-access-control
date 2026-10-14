@@ -3,9 +3,10 @@ package eu.hohenegger.accesscontrol.permission;
 import eu.hohenegger.accesscontrol.web.PolicyRules;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.test.context.junit.jupiter.SpringJUnitConfig;
+import org.springframework.context.annotation.Import;
 
 import static eu.hohenegger.accesscontrol.permission.Action.VIEW_ASSOCIATION;
 import static eu.hohenegger.accesscontrol.permission.Action.VIEW_POLLS;
@@ -15,10 +16,11 @@ import static eu.hohenegger.accesscontrol.permission.Relationships.TENANTS;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** A feature extends the policy just by declaring a {@link PolicyCustomizer} bean. */
-@SpringJUnitConfig({PolicyRules.class, PolicyCustomizerTest.TenantPolls.class})
+@DataJpaTest
+@Import({PolicyRules.class, PolicyCustomizerTest.TenantPolls.class})
 class PolicyCustomizerTest {
 
-    @Configuration
+    @TestConfiguration
     static class TenantPolls {
 
         @Bean
