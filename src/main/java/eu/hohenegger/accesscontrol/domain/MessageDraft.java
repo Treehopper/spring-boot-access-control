@@ -68,7 +68,7 @@ public final class MessageDraft {
 
     /** Sends the message and returns it. */
     public Message saying(String body) {
-        return community.post(new Message(community.nextId(), Objects.requireNonNull(sender, "sender"),
+        return community.post(new Message(Objects.requireNonNull(sender, "sender"),
                 Objects.requireNonNull(association, "association"), Objects.requireNonNull(audience, "audience"),
                 recipient, Objects.requireNonNull(subject, "subject"), body, community.now()));
     }

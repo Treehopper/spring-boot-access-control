@@ -1,27 +1,54 @@
 package eu.hohenegger.accesscontrol.domain;
 
+import jakarta.persistence.CascadeType;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.OrderBy;
+
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.stream.Stream;
 
-public final class Association implements AssociationScoped {
+@Entity
+public class Association implements AssociationScoped {
 
-    private final String id;
-    private final String name;
-    private final District district;
-    private final List<Unit> units = new CopyOnWriteArrayList<>();
-    private final List<Membership> memberships = new CopyOnWriteArrayList<>();
+    @Id
+    @Column(length = 100)
+    private String id;
 
-    Association(String id, String name, District district) {
+    @Column(nullable = false)
+    private String name;
+
+    @ManyToOne(optional = false)
+    @JoinColumn(name = "district_id")
+    private District district;
+
+    /** Position within the district, to keep the associations in the order they were created. */
+    @Column(nullable = false)
+    private int ordinal;
+
+    @OneToMany(mappedBy = "association", cascade = CascadeType.ALL)
+    @OrderBy("id")
+    private List<Unit> units = new ArrayList<>();
+
+    protected Association() {
+    }
+
+    Association(String id, String name, District district, int ordinal) {
         this.id = id;
         this.name = name;
         this.district = district;
+        this.ordinal = ordinal;
     }
 
     /** The unit with this name, created on first use: {@code maple.unit("Apt 1").ownedBy(alice).rentedTo(bob)}. */
-    public synchronized Unit unit(String name) {
+    public Unit unit(String name) {
         return units.stream().filter(unit -> unit.name().equals(name)).findFirst().orElseGet(() -> {
             Unit unit = new Unit(name, this);
             units.add(unit);
@@ -37,8 +64,9 @@ public final class Association implements AssociationScoped {
         return List.copyOf(units);
     }
 
+    /** The memberships of all units, unit by unit. */
     public Residents residents() {
-        return new Residents(memberships);
+        return new Residents(units.stream().flatMap(unit -> unit.memberships().stream()).toList());
     }
 
     @Override
@@ -56,11 +84,6 @@ public final class Association implements AssociationScoped {
 
     public District district() {
         return district;
-    }
-
-    Membership add(Membership membership) {
-        memberships.add(membership);
-        return membership;
     }
 
     @Override

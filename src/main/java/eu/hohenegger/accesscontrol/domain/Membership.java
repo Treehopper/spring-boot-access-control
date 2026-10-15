@@ -1,5 +1,14 @@
 package eu.hohenegger.accesscontrol.domain;
 
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+
 import java.time.Instant;
 import java.util.Optional;
 import java.util.stream.Stream;
@@ -8,14 +17,35 @@ import java.util.stream.Stream;
  * A resident's place in an association. Ending a membership sets {@link #until()} instead of deleting it,
  * so former residents stay visible as such.
  */
-public final class Membership implements TimeBound, AssociationScoped {
+@Entity
+public class Membership implements TimeBound, AssociationScoped {
 
-    private final User resident;
-    private final Unit unit;
-    private volatile Role role;
-    private volatile boolean livesThere;
-    private volatile Instant since;
-    private volatile Instant until;
+    @Id
+    @GeneratedValue
+    private Long id;
+
+    @ManyToOne(optional = false)
+    @JoinColumn(name = "resident_username")
+    private User resident;
+
+    @ManyToOne(optional = false)
+    @JoinColumn(name = "unit_id")
+    private Unit unit;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private Role role;
+
+    @Column(name = "lives_there", nullable = false)
+    private boolean livesThere;
+
+    @Column(nullable = false)
+    private Instant since;
+
+    private Instant until;
+
+    protected Membership() {
+    }
 
     Membership(User resident, Unit unit, Role role, Instant since) {
         this.resident = resident;

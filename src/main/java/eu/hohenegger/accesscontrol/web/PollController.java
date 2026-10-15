@@ -8,6 +8,7 @@ import eu.hohenegger.accesscontrol.domain.User;
 import eu.hohenegger.accesscontrol.permission.Permissions;
 import eu.hohenegger.accesscontrol.permission.RequirePermission;
 import org.springframework.http.HttpStatus;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -57,6 +58,7 @@ class PollController {
                 .toList();
     }
 
+    @Transactional
     @PostMapping("/associations/{id}/polls")
     @RequirePermission(action = "CREATE_POLL", on = "id")
     @ResponseStatus(HttpStatus.CREATED)
@@ -69,6 +71,7 @@ class PollController {
         return view(poll, me);
     }
 
+    @Transactional
     @PostMapping("/polls/{pollId}/votes")
     @RequirePermission(action = "VOTE", on = "pollId")
     PollView vote(@PathVariable String pollId, @RequestBody Ballot ballot, User me) {

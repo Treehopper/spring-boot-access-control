@@ -9,6 +9,7 @@ import eu.hohenegger.accesscontrol.domain.Unit;
 import eu.hohenegger.accesscontrol.domain.User;
 import eu.hohenegger.accesscontrol.permission.RequirePermission;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -73,6 +74,7 @@ class AdminController {
      * Admits someone to a unit, or changes the role of their current membership in that unit. Memberships in other
      * units are not affected, so an owner of two flats is managed per flat.
      */
+    @Transactional
     @PutMapping("/associations/{id}/units/{unitId}/residents/{username}")
     @RequirePermission(action = "MANAGE_RESIDENTS", on = "id")
     Resident putResident(@PathVariable String id, @PathVariable String unitId, @PathVariable String username,
@@ -103,6 +105,7 @@ class AdminController {
         return resident(membership);
     }
 
+    @Transactional
     @DeleteMapping("/associations/{id}/units/{unitId}/residents/{username}")
     @RequirePermission(action = "MANAGE_RESIDENTS", on = "id")
     ResponseEntity<Void> endResidency(@PathVariable String id, @PathVariable String unitId, @PathVariable String username, User me) {
@@ -116,6 +119,7 @@ class AdminController {
     }
 
     /** Lets {@code delegate} see the dues account of {@code username}, or changes the stated purpose. */
+    @Transactional
     @PutMapping("/residents/{username}/delegates/{delegate}")
     @RequirePermission(action = "MANAGE_DELEGATES", on = "username")
     Delegate putDelegate(@PathVariable String username, @PathVariable String delegate, @RequestBody DelegateChange change, User me) {
@@ -132,6 +136,7 @@ class AdminController {
         return new Delegate(PersonRef.of(holder), PersonRef.of(delegateUser), delegation.purpose(), delegation.since());
     }
 
+    @Transactional
     @DeleteMapping("/residents/{username}/delegates/{delegate}")
     @RequirePermission(action = "MANAGE_DELEGATES", on = "username")
     ResponseEntity<Void> endDelegation(@PathVariable String username, @PathVariable String delegate, User me) {

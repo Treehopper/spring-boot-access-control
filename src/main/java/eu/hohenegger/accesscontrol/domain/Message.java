@@ -1,23 +1,56 @@
 package eu.hohenegger.accesscontrol.domain;
 
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+
 import java.time.Instant;
 import java.util.Optional;
 import java.util.stream.Stream;
 
-public final class Message implements AssociationScoped {
+@Entity
+public class Message implements AssociationScoped {
 
-    private final String id;
-    private final User sender;
-    private final Association association;
-    private final Audience audience;
-    private final User recipient;
-    private final String subject;
-    private final String body;
-    private final Instant sentAt;
+    @Id
+    @GeneratedValue
+    private Long id;
 
-    Message(String id, User sender, Association association, Audience audience, User recipient,
+    @ManyToOne(optional = false)
+    @JoinColumn(name = "sender_username")
+    private User sender;
+
+    @ManyToOne(optional = false)
+    @JoinColumn(name = "association_id")
+    private Association association;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private Audience audience;
+
+    /** Only for {@link Audience#INDIVIDUAL} messages. */
+    @ManyToOne
+    @JoinColumn(name = "recipient_username")
+    private User recipient;
+
+    @Column(nullable = false)
+    private String subject;
+
+    @Column(length = 4000)
+    private String body;
+
+    @Column(name = "sent_at", nullable = false)
+    private Instant sentAt;
+
+    protected Message() {
+    }
+
+    Message(User sender, Association association, Audience audience, User recipient,
             String subject, String body, Instant sentAt) {
-        this.id = id;
         this.sender = sender;
         this.association = association;
         this.audience = audience;
@@ -27,8 +60,9 @@ public final class Message implements AssociationScoped {
         this.sentAt = sentAt;
     }
 
+    /** Assigned when the message is sent. */
     public String id() {
-        return id;
+        return String.valueOf(id);
     }
 
     public User sender() {

@@ -1,31 +1,32 @@
 package eu.hohenegger.accesscontrol.domain;
 
+import jakarta.persistence.EntityManager;
+
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * The aggregate root and in-memory store of the demo: users, districts with their associations,
- * delegations, dues accounts, polls and messages.
+ * The aggregate root and store of the demo: users, districts with their associations, delegations, dues accounts,
+ * polls and messages, kept in the database through JPA.
+ * <p>
+ * Creating things ({@link #user}, {@link #district}, the drafts) needs a transaction; reading doesn't.
  */
 public final class Community {
 
-    private final Clock clock;
-    private final AtomicLong sequence = new AtomicLong();
-    private final List<User> users = new CopyOnWriteArrayList<>();
-    private final List<District> districts = new CopyOnWriteArrayList<>();
-    private final List<Delegation> delegations = new CopyOnWriteArrayList<>();
-    private final List<DuesAccount> duesAccounts = new CopyOnWriteArrayList<>();
-    private final List<Poll> polls = new CopyOnWriteArrayList<>();
-    private final List<Message> messages = new CopyOnWriteArrayList<>();
+    /** All domain tables, children first, so they can be emptied in this order. */
+    private static final List<String> TABLES = List.of("poll_vote", "poll", "message", "dues_entry", "dues_account",
+            "delegation", "membership", "staff_assignment", "unit", "association", "district", "app_user");
 
-    public Community(Clock clock) {
+    private final Clock clock;
+    private final EntityManager entityManager;
+
+    public Community(Clock clock, EntityManager entityManager) {
         this.clock = clock;
+        this.entityManager = entityManager;
     }
 
     public Instant now() {
@@ -39,27 +40,19 @@ public final class Community {
     // --- building -----------------------------------------------------------------------------------------------
 
     public User user(String username, String displayName) {
-        User user = new User(username, displayName);
-        users.add(user);
-        return user;
+        return persist(new User(username, displayName));
     }
 
     public District district(String name) {
-        District district = new District(this, slug(name), name);
-        districts.add(district);
-        return district;
+        return persist(new District(clock, slug(name), name, districts().size()));
     }
 
     public DelegationDraft grant(User delegate) {
         return new DelegationDraft(this, delegate);
     }
 
-    public synchronized DuesAccount duesOf(User holder) {
-        return findDuesAccountOf(holder).orElseGet(() -> {
-            DuesAccount account = new DuesAccount(holder, this);
-            duesAccounts.add(account);
-            return account;
-        });
+    public DuesAccount duesOf(User holder) {
+        return findDuesAccountOf(holder).orElseGet(() -> persist(new DuesAccount(holder)));
     }
 
     public PollDraft poll() {
@@ -75,96 +68,102 @@ public final class Community {
     /** Usernames are matched ignoring case and surrounding blanks. */
     public Optional<User> findUser(String username) {
         String wanted = username == null ? "" : username.strip();
-        return users.stream().filter(user -> user.username().equalsIgnoreCase(wanted)).findFirst();
+        return entityManager.createQuery("select u from User u where lower(u.username) = lower(:username)", User.class)
+                .setParameter("username", wanted)
+                .getResultStream().findFirst();
     }
 
     public Optional<Association> findAssociation(String id) {
-        return associations().stream().filter(association -> association.id().equals(id)).findFirst();
+        return Optional.ofNullable(id).map(key -> entityManager.find(Association.class, key));
     }
 
     public Optional<Poll> findPoll(String id) {
-        return polls.stream().filter(poll -> poll.id().equals(id)).findFirst();
+        return numeric(id).map(key -> entityManager.find(Poll.class, key));
     }
 
     public Optional<Message> findMessage(String id) {
-        return messages.stream().filter(message -> message.id().equals(id)).findFirst();
+        return numeric(id).map(key -> entityManager.find(Message.class, key));
     }
 
     public Optional<DuesAccount> findDuesAccountOf(User holder) {
-        return duesAccounts.stream().filter(account -> account.holder().equals(holder)).findFirst();
+        return entityManager.createQuery("select d from DuesAccount d where d.holder = :holder", DuesAccount.class)
+                .setParameter("holder", holder)
+                .getResultStream().findFirst();
     }
 
     public List<User> users() {
-        return List.copyOf(users);
+        return entityManager.createQuery("select u from User u order by u.username", User.class).getResultList();
     }
 
     public List<District> districts() {
-        return List.copyOf(districts);
+        return entityManager.createQuery("select d from District d order by d.ordinal", District.class).getResultList();
     }
 
     public List<Association> associations() {
-        return districts.stream().flatMap(district -> district.associations().stream()).toList();
+        return districts().stream().flatMap(district -> district.associations().stream()).toList();
     }
 
     /** All memberships of a person, current and past. */
     public List<Membership> membershipsOf(User person) {
-        return associations().stream().flatMap(association -> association.residents().stream())
-                .filter(membership -> membership.resident().equals(person))
-                .toList();
+        return entityManager.createQuery("select m from Membership m where m.resident = :person order by m.id", Membership.class)
+                .setParameter("person", person)
+                .getResultList();
     }
 
     public List<StaffAssignment> staffAssignmentsOf(User person) {
-        return districts.stream().flatMap(district -> district.staff().stream())
-                .filter(assignment -> assignment.person().equals(person))
-                .toList();
+        return entityManager.createQuery("select s from StaffAssignment s where s.person = :person order by s.id", StaffAssignment.class)
+                .setParameter("person", person)
+                .getResultList();
     }
 
     public Delegations delegations() {
-        return new Delegations(delegations);
+        return new Delegations(entityManager.createQuery("select d from Delegation d order by d.id", Delegation.class).getResultList());
     }
 
     public List<DuesAccount> duesAccounts() {
-        return List.copyOf(duesAccounts);
+        return entityManager.createQuery("select d from DuesAccount d order by d.id", DuesAccount.class).getResultList();
     }
 
     public List<Poll> polls() {
-        return List.copyOf(polls);
+        return entityManager.createQuery("select p from Poll p order by p.id", Poll.class).getResultList();
     }
 
     public List<Message> messages() {
-        return List.copyOf(messages);
+        return entityManager.createQuery("select m from Message m order by m.id", Message.class).getResultList();
     }
 
-    /** Forgets everything; used to re-seed the demo. */
-    public synchronized void clear() {
-        sequence.set(0);
-        users.clear();
-        districts.clear();
-        delegations.clear();
-        duesAccounts.clear();
-        polls.clear();
-        messages.clear();
+    /** Forgets everything except the permission policy; used to re-seed the demo. */
+    public void clear() {
+        entityManager.flush();
+        TABLES.forEach(table -> entityManager.createNativeQuery("delete from " + table).executeUpdate());
+        entityManager.clear();
     }
 
     // --- internals used by the drafts ---------------------------------------------------------------------------
 
-    String nextId() {
-        return Long.toString(sequence.incrementAndGet());
-    }
-
     Message post(Message message) {
-        messages.add(message);
-        return message;
+        return persist(message);
     }
 
     Poll open(Poll poll) {
-        polls.add(poll);
-        return poll;
+        return persist(poll);
     }
 
     Delegation add(Delegation delegation) {
-        delegations.add(delegation);
-        return delegation;
+        return persist(delegation);
+    }
+
+    private <T> T persist(T entity) {
+        entityManager.persist(entity);
+        return entity;
+    }
+
+    private static Optional<Long> numeric(String id) {
+        try {
+            return Optional.of(Long.parseLong(id));
+        } catch (NumberFormatException notAnId) {
+            return Optional.empty();
+        }
     }
 
     static String slug(String name) {

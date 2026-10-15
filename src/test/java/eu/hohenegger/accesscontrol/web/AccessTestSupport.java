@@ -5,6 +5,8 @@ import eu.hohenegger.accesscontrol.domain.Community;
 import eu.hohenegger.accesscontrol.domain.Message;
 import eu.hohenegger.accesscontrol.domain.Poll;
 import org.junit.jupiter.api.BeforeEach;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.junit.jupiter.api.DynamicTest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
@@ -46,10 +48,15 @@ abstract class AccessTestSupport {
     @Autowired
     Community community;
 
+    @Autowired
+    PlatformTransactionManager transactionManager;
+
     @BeforeEach
     void resetDemoData() {
-        community.clear();
-        DemoData.populate(community);
+        new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+            community.clear();
+            DemoData.populate(community);
+        });
     }
 
     ResultActions as(String persona, MockHttpServletRequestBuilder request) throws Exception {

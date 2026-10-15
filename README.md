@@ -13,7 +13,7 @@ java -jar target/spring-boot-access-control-0.0.1-SNAPSHOT.jar
 ```
 
 Open <http://localhost:8080> and pick a persona. There is no password, and you can switch personas at any
-time. Data lives in memory and is reset on restart.
+time. Data is kept in an embedded H2 database (see [The database](#the-database)) and is reset on restart.
 
 Most units are rented out by their owner to a tenant. mia lives in her own flat, and Apt 3 has been vacant since
 erin moved out:
@@ -91,6 +91,9 @@ community.grant(dave).accessToDuesOf(alice).as("Accountant");
 community.message().from(carol).toOwnersOf(maple).about("Annual assembly: agenda").saying("...");
 ```
 
+The domain classes are JPA entities, and [`Community`](src/main/java/eu/hohenegger/accesscontrol/domain/Community.java)
+stores and finds them through the `EntityManager`, so the fluent API is unchanged.
+
 **Audit log.** All permission-related activity goes to the logger `access`. At `DEBUG` it also logs every
 single policy decision.
 
@@ -103,7 +106,7 @@ ADMIN   carol ended bob's access to Maple Court
 ```
 
 **Tests.** The `@WebMvcTest` tests state, for each endpoint, exactly who may use it. Every other persona is
-expected to get `403`, so each line generates one positive or negative test per persona (692 tests in total):
+expected to get `403`, so each line generates one positive or negative test per persona (695 tests in total):
 
 ```java
 access("read a message to the owners of Maple Court", () -> get("/api/messages/{id}", messageId(ASSEMBLY)))
@@ -284,8 +287,8 @@ action on something it can't judge (for example `landlords` with `VIEW_DUES`: la
 dues accounts). In code the compiler prevents that pairing; for the database, `PolicyStoreTest` tests the check.
 
 The code stays the source of truth. The stored policy is replaced as a whole at every start, so a permission
-removed from a customizer also disappears from the database. The demo uses an embedded H2 database; set
-`spring.datasource.url` to keep the policy in another database, for example to query it from a reporting tool.
+removed from a customizer also disappears from the database. To look at the stored policy, see
+[The database](#the-database).
 
 ### Example: owners see their own tenant, but not the others
 
@@ -337,6 +340,172 @@ FILTERED alice VIEW_TENANT: 1 of 2 granted
 
 Because the relationship is checked at the moment of the request, the name disappears as soon as bob's lease ends
 or alice sells Apt 1. `ownersSeeTheTenantsOfTheirOwnFlatsByName` in `AssociationAccessTest` tests the table above.
+
+## The database
+
+Everything is stored with JPA in an embedded H2 database: the permission policy (see
+[Storing it: the JPA model](#storing-it-the-jpa-model)) and the domain. Both are recreated with the demo data on
+every start; set `spring.datasource.url` to use another database.
+
+### Domain model
+
+```mermaid
+erDiagram
+    district ||--o{ association : "groups"
+    district ||--o{ staff_assignment : "is looked after by"
+    app_user ||--o{ staff_assignment : "works as"
+    association ||--o{ unit : "consists of"
+    unit ||--o{ membership : "has"
+    app_user ||--o{ membership : "belongs as"
+    app_user ||--o{ delegation : "shares dues (holder)"
+    app_user ||--o{ delegation : "sees dues (delegate)"
+    app_user ||--o| dues_account : "holds"
+    dues_account ||--o{ dues_entry : "lists"
+    association ||--o{ poll : "holds"
+    app_user ||--o{ poll : "asks"
+    poll ||--o{ poll_vote : "receives"
+    app_user ||--o{ poll_vote : "casts"
+    association ||--o{ message : "receives"
+    app_user ||--o{ message : "sends"
+    app_user |o--o{ message : "is the recipient of"
+
+    app_user {
+        varchar username PK "e.g. alice"
+        varchar display_name
+    }
+    district {
+        varchar id PK "e.g. riverside"
+        varchar name
+        int ordinal
+    }
+    staff_assignment {
+        bigint id PK
+        varchar person_username FK
+        varchar district_id FK
+        varchar title "e.g. Property manager"
+        timestamp since
+        timestamp until "empty while active"
+    }
+    association {
+        varchar id PK "e.g. maple-court"
+        varchar district_id FK
+        varchar name
+        int ordinal
+    }
+    unit {
+        bigint id PK
+        varchar association_id FK, UK
+        varchar slug UK "e.g. apt-1"
+        varchar name
+    }
+    membership {
+        bigint id PK
+        varchar resident_username FK
+        bigint unit_id FK
+        enum role "OWNER or TENANT"
+        boolean lives_there
+        timestamp since
+        timestamp until "empty while active"
+    }
+    delegation {
+        bigint id PK
+        varchar holder_username FK
+        varchar delegate_username FK
+        varchar purpose "e.g. Accountant"
+        timestamp since
+        timestamp until "empty while active"
+    }
+    dues_account {
+        bigint id PK
+        varchar holder_username FK, UK
+    }
+    dues_entry {
+        bigint dues_account_id PK, FK
+        int line_no PK
+        date entry_date
+        varchar description
+        bigint amount_cents "payments are negative"
+    }
+    poll {
+        bigint id PK
+        varchar association_id FK
+        varchar asked_by_username FK
+        varchar question
+        timestamp created_at
+    }
+    poll_vote {
+        bigint poll_id PK, FK
+        varchar voter_username PK, FK
+        enum choice "YES, NO or ABSTAIN"
+    }
+    message {
+        bigint id PK
+        varchar association_id FK
+        varchar sender_username FK
+        enum audience "EVERYONE, OWNERS, TENANTS, OCCUPANTS or INDIVIDUAL"
+        varchar recipient_username FK "only for INDIVIDUAL"
+        varchar subject
+        varchar body
+        timestamp sent_at
+    }
+```
+
+A person's role isn't a property of the person. It is stored per unit, in `membership.role`: frank has two rows,
+as owner of Apt 2 and of Apt 3. Staff have a `staff_assignment` per district instead. Nothing is deleted: ending a
+lease, a sale or a delegation sets `until`, so the history stays and the admin view can reinstate people.
+
+### How the relationships in the policy find their rows
+
+The policy's relationships (`policy_relationship`) and the domain have no foreign key between them. A relationship
+names a *kind* of connection, and its code finds out at request time whether the domain contains one between the
+person and the target:
+
+| Relationship | Holds if the database contains |
+|---|---|
+| owners | an active `membership` with role `OWNER` in a unit of the target's association |
+| tenants | an active `membership` with role `TENANT` in a unit of the target's association |
+| landlords | an active `OWNER` membership in the same `unit` as the tenancy being looked at |
+| district managers | an active `staff_assignment` for the district of the target's association |
+| senders | `message.sender_username` is the person |
+| addressees | the person has an active `membership` that matches `message.audience`, or is its `recipient_username` |
+| account holders | `dues_account.holder_username` is the person |
+| delegates | an active `delegation` from the account's holder to the person |
+
+"Active" means `since` has passed and `until` is empty or still in the future.
+
+### Looking at it: the H2 console
+
+Open <http://localhost:8080/h2-console> and connect with JDBC URL `jdbc:h2:mem:hoa`, user `sa` and an empty
+password. Changes made in the portal, for example on the *Residents* tab, show up here immediately.
+
+Who has which role where:
+
+```sql
+select m.resident_username, m.role, m.lives_there, u.name as unit, a.name as association, m.since, m.until
+from membership m join unit u on u.id = m.unit_id join association a on a.id = u.association_id
+order by a.name, u.name, m.role;
+```
+
+Who may see a tenant's name:
+
+```sql
+select r.name as relationship, p.defined_by
+from policy_permission p join policy_relationship r on r.name = p.relationship_name
+where p.action_name = 'VIEW_TENANT'
+order by p.ordinal;
+```
+
+The console has its own security filter chain, because it runs in frames and doesn't send the portal's CSRF
+token. It is meant for the demo only: it can run any SQL, and H2 only accepts connections to it from localhost.
+
+### Transactions
+
+Each web request has one persistence context (`spring.jpa.open-in-view=true`), so permission checks and
+controllers can follow the associations between entities, for example from a message to the memberships of its
+association. The endpoints that change data are `@Transactional`. Entities loaded from the database need the
+application's `Clock` to record when someone is appointed or admitted; a JPA entity listener
+([`ClockListener`](src/main/java/eu/hohenegger/accesscontrol/domain/ClockListener.java)) hands it to them.
+`CommunityPersistenceTest` checks the stored rows and that changes survive a new persistence context.
 
 ## Design notes
 

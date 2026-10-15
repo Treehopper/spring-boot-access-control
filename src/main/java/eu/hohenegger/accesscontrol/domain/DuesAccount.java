@@ -1,21 +1,42 @@
 package eu.hohenegger.accesscontrol.domain;
 
+import jakarta.persistence.CollectionTable;
+import jakarta.persistence.ElementCollection;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.OneToOne;
+import jakarta.persistence.OrderColumn;
+
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.stream.Stream;
 
 /** The dues an owner pays. It belongs to the associations in which its holder currently owns a unit. */
-public final class DuesAccount implements AssociationScoped {
+@Entity
+public class DuesAccount implements AssociationScoped {
 
-    private final User holder;
-    private final Community community;
-    private final List<DuesEntry> entries = new CopyOnWriteArrayList<>();
+    @Id
+    @GeneratedValue
+    private Long id;
 
-    DuesAccount(User holder, Community community) {
+    @OneToOne(optional = false)
+    @JoinColumn(name = "holder_username", unique = true)
+    private User holder;
+
+    @ElementCollection
+    @CollectionTable(name = "dues_entry", joinColumns = @JoinColumn(name = "dues_account_id"))
+    @OrderColumn(name = "line_no")
+    private List<DuesEntry> entries = new ArrayList<>();
+
+    protected DuesAccount() {
+    }
+
+    DuesAccount(User holder) {
         this.holder = holder;
-        this.community = community;
     }
 
     public DuesAccount charge(LocalDate date, String description, long amountCents) {
@@ -42,8 +63,10 @@ public final class DuesAccount implements AssociationScoped {
 
     @Override
     public Stream<Association> associationsAt(Instant instant) {
-        return community.associations().stream()
-                .filter(association -> association.residents().activeAt(instant).owners().include(holder));
+        return holder.memberships().stream()
+                .filter(membership -> membership.role() == Role.OWNER && membership.isActiveAt(instant))
+                .map(Membership::association)
+                .distinct();
     }
 
     @Override

@@ -1,27 +1,59 @@
 package eu.hohenegger.accesscontrol.domain;
 
+import jakarta.persistence.CascadeType;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EntityListeners;
+import jakarta.persistence.Id;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.OrderBy;
+import jakarta.persistence.Transient;
+
+import java.time.Clock;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.CopyOnWriteArrayList;
 
 /** A group of associations looked after by the same staff. */
-public final class District {
+@Entity
+@EntityListeners(ClockListener.class)
+public class District {
 
-    private final Community community;
-    private final String id;
-    private final String name;
-    private final List<Association> associations = new CopyOnWriteArrayList<>();
-    private final List<StaffAssignment> staff = new CopyOnWriteArrayList<>();
+    @Id
+    @Column(length = 100)
+    private String id;
 
-    District(Community community, String id, String name) {
-        this.community = community;
+    @Column(nullable = false)
+    private String name;
+
+    /** Position among the districts, to keep them in the order they were created. */
+    @Column(nullable = false)
+    private int ordinal;
+
+    @OneToMany(mappedBy = "district", cascade = CascadeType.ALL)
+    @OrderBy("ordinal")
+    private List<Association> associations = new ArrayList<>();
+
+    @OneToMany(mappedBy = "district", cascade = CascadeType.ALL)
+    @OrderBy("id")
+    private List<StaffAssignment> staff = new ArrayList<>();
+
+    @Transient
+    private Clock clock;
+
+    protected District() {
+    }
+
+    District(Clock clock, String id, String name, int ordinal) {
+        this.clock = clock;
         this.id = id;
         this.name = name;
+        this.ordinal = ordinal;
     }
 
     public Association association(String name) {
-        Association association = new Association(Community.slug(name), name, this);
+        Association association = new Association(Community.slug(name), name, this, associations.size());
         associations.add(association);
         return association;
     }
@@ -54,8 +86,12 @@ public final class District {
         return name;
     }
 
-    Community community() {
-        return community;
+    Instant now() {
+        return clock.instant();
+    }
+
+    void attach(Clock clock) {
+        this.clock = clock;
     }
 
     @Override
@@ -72,7 +108,7 @@ public final class District {
         }
 
         public StaffAssignment as(String title) {
-            StaffAssignment assignment = new StaffAssignment(person, District.this, title, community.now());
+            StaffAssignment assignment = new StaffAssignment(person, District.this, title, now());
             staff.add(assignment);
             return assignment;
         }

@@ -1,16 +1,41 @@
 package eu.hohenegger.accesscontrol.domain;
 
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+
 import java.time.Instant;
 import java.util.Optional;
 
 /** An owner lets someone else see their dues account, e.g. their accountant. */
-public final class Delegation implements TimeBound {
+@Entity
+public class Delegation implements TimeBound {
 
-    private final User holder;
-    private final User delegate;
-    private volatile String purpose;
-    private final Instant since;
-    private volatile Instant until;
+    @Id
+    @GeneratedValue
+    private Long id;
+
+    @ManyToOne(optional = false)
+    @JoinColumn(name = "holder_username")
+    private User holder;
+
+    @ManyToOne(optional = false)
+    @JoinColumn(name = "delegate_username")
+    private User delegate;
+
+    @Column(nullable = false)
+    private String purpose;
+
+    @Column(nullable = false)
+    private Instant since;
+
+    private Instant until;
+
+    protected Delegation() {
+    }
 
     Delegation(User holder, User delegate, String purpose, Instant since) {
         this.holder = holder;

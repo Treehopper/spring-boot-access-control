@@ -24,7 +24,7 @@ public final class PollDraft {
     }
 
     public Poll asking(String question) {
-        return community.open(new Poll(community.nextId(), Objects.requireNonNull(association, "association"),
+        return community.open(new Poll(Objects.requireNonNull(association, "association"),
                 Objects.requireNonNull(askedBy, "askedBy"), question, community.now()));
     }
 }

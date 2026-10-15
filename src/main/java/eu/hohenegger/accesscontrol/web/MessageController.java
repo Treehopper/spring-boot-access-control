@@ -8,6 +8,7 @@ import eu.hohenegger.accesscontrol.domain.User;
 import eu.hohenegger.accesscontrol.permission.Permissions;
 import eu.hohenegger.accesscontrol.permission.RequirePermission;
 import org.springframework.http.HttpStatus;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -60,6 +61,7 @@ class MessageController {
         return view(community.findMessage(id).orElseThrow(() -> new ResponseStatusException(NOT_FOUND)));
     }
 
+    @Transactional
     @PostMapping("/associations/{id}/messages")
     @RequirePermission(action = "SEND_MESSAGE", on = "id")
     @ResponseStatus(HttpStatus.CREATED)
